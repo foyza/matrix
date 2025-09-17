@@ -21,4 +21,4 @@ COPY bot_project.py /app/bot_project.py
 COPY .env.example /app/.env.example
 
 # Expose nothing (bot uses outgoing connections). Use CMD to run.
-CMD ["python", "/app/bot_project.py"]
+CMD ["python", "bot.py"]
