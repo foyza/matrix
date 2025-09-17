@@ -1,0 +1,13 @@
+aiogram==3.0.0
+aiohttp
+pandas
+numpy
+python-dotenv
+lightgbm
+scikit-learn
+tensorflow
+joblib
+matplotlib
+twelvedata
+vectorbt
+nltk
