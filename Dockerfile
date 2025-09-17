@@ -17,8 +17,7 @@ RUN python -m pip install --upgrade pip setuptools wheel
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
 # Copy project
-COPY bot_project.py /app/bot_project.py
-COPY .env.example /app/.env.example
+COPY bot.py /app/bot.py
 
 # Expose nothing (bot uses outgoing connections). Use CMD to run.
 CMD ["python", "bot.py"]
