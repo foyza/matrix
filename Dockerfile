@@ -18,5 +18,8 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 # Copy project
 COPY bot.py /app/bot.py
 
+# Hide TF INFO logs
+ENV TF_CPP_MIN_LOG_LEVEL=2
+
 # Run bot
 CMD ["python", "bot.py"]
