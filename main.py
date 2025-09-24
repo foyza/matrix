@@ -26,7 +26,10 @@ ASSETS = ['BTC/USD', 'XAU/USD', 'ETH/USD']
 
 logging.basicConfig(level=logging.INFO)
 dp = Dispatcher()
-bot = Bot(token=TOKEN, parse_mode=ParseMode.HTML)
+bot = Bot(
+    token=TOKEN,
+    default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+)
 user_settings = {}  # {uid: {"asset": ... , "muted": False}}
 
 # === ML + LSTM ===
