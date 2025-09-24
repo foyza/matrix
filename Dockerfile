@@ -1,25 +1,26 @@
-# Use slim image
+# --- Base image ---
 FROM python:3.11-slim
 
-# Install system deps needed for building some Python packages
+# --- System deps ---
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential cmake git curl wget ca-certificates \
-    libgomp1 libblas-dev liblapack-dev \
+    build-essential \
     && rm -rf /var/lib/apt/lists/*
 
+# --- Set workdir ---
 WORKDIR /app
 
-# Copy requirements and install
-COPY requirements.txt /app/requirements.txt
-ENV PIP_NO_CACHE_DIR=off
-RUN python -m pip install --upgrade pip setuptools wheel
-RUN pip install --no-cache-dir -r /app/requirements.txt
+# --- Install Python deps ---
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy project
-COPY bot.py /app/bot.py
+# --- Download NLTK data (VADER lexicon) ---
+RUN python -m nltk.downloader vader_lexicon
 
-# Hide TF INFO logs
-ENV TF_CPP_MIN_LOG_LEVEL=2
+# --- Copy project files ---
+COPY . .
 
-# Run bot
+# --- Env variables ---
+ENV PYTHONUNBUFFERED=1
+
+# --- Start bot ---
 CMD ["python", "bot.py"]
