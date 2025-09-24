@@ -24,10 +24,10 @@ import ta
 # ===============================
 load_dotenv()
 TOKEN = os.getenv("TELEGRAM_TOKEN")
-API_KEY = os.getenv("TWELVE_API_KEY")
+API_KEY = os.getenv("TWELVEDATA_API_KEY")
 
 if not TOKEN or not API_KEY:
-    raise ValueError("TELEGRAM_TOKEN или TWELVE_API_KEY не найдены в .env")
+    raise ValueError("TELEGRAM_TOKEN или TWELVEDATA_API_KEY не найдены в .env")
 
 logging.basicConfig(level=logging.INFO)
 
