@@ -19,6 +19,10 @@ RUN python -m nltk.downloader vader_lexicon
 # --- Copy project files ---
 COPY . .
 
+# --- Reduce TensorFlow spam in logs ---
+ENV TF_CPP_MIN_LOG_LEVEL=2
+ENV TF_ENABLE_ONEDNN_OPTS=0
+
 # --- Env variables ---
 ENV PYTHONUNBUFFERED=1
 
