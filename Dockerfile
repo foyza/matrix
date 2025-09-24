@@ -12,16 +12,16 @@ WORKDIR /app
 # Копируем зависимости
 COPY requirements.txt .
 
-# Скачать данные для nltk (например, punkt для токенизации)
-RUN python -m nltk.downloader punkt stopwords
-
-# Устанавливаем зависимости
+# Установка Python-зависимостей
 RUN pip install --no-cache-dir -r requirements.txt
+
+# Скачиваем ресурсы для nltk (токенизаторы, стоп-слова и т.д.)
+RUN python -m nltk.downloader punkt stopwords
 
 # Копируем всё приложение
 COPY . .
 
-# Указываем переменные окружения (лучше .env пробросить через Railway/другой деплой)
+# Переменные окружения (лучше пробрасывать через .env или Railway Secrets)
 ENV PYTHONUNBUFFERED=1
 
 # Запуск бота
