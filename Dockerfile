@@ -19,4 +19,4 @@ ENV PYTHONUNBUFFERED=1
 ENV TF_CPP_MIN_LOG_LEVEL=2
 ENV TF_ENABLE_ONEDNN_OPTS=0
 
-CMD ["python", "main.py"]
+CMD ["python", "bot.py"]
