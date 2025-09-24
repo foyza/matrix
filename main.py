@@ -23,11 +23,11 @@ import ta
 # Загрузка окружения и логирование
 # ===============================
 load_dotenv()
-TOKEN = os.getenv("BOT_TOKEN")
+TOKEN = os.getenv("TELEGRAM_TOKEN")
 API_KEY = os.getenv("TWELVE_API_KEY")
 
 if not TOKEN or not API_KEY:
-    raise ValueError("BOT_TOKEN или TWELVE_API_KEY не найдены в .env")
+    raise ValueError("TELEGRAM_TOKEN или TWELVE_API_KEY не найдены в .env")
 
 logging.basicConfig(level=logging.INFO)
 
