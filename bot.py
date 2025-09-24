@@ -24,7 +24,7 @@ os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 
 # === load .env ===
 load_dotenv()
-TOKEN = os.getenv("BOT_TOKEN")
+TOKEN = os.getenv("TELEGRAM_TOKEN")
 TWELVEDATA_API_KEY = os.getenv("TWELVEDATA_API_KEY")
 NEWS_API_KEY = os.getenv("NEWS_API_KEY")
 
