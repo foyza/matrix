@@ -7,4 +7,3 @@ tensorflow==2.17.0
 nltk==3.9.1
 python-dotenv==1.0.1
 
-
