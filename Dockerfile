@@ -12,6 +12,9 @@ WORKDIR /app
 # Копируем зависимости
 COPY requirements.txt .
 
+# Скачать данные для nltk (например, punkt для токенизации)
+RUN python -m nltk.downloader punkt stopwords
+
 # Устанавливаем зависимости
 RUN pip install --no-cache-dir -r requirements.txt
 
