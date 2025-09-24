@@ -1,27 +1,24 @@
-# Базовый образ с Python
+# Используем лёгкий Python-образ
 FROM python:3.11-slim
 
-# Установка системных зависимостей
-RUN apt-get update && apt-get install -y \
+# Устанавливаем зависимости для сборки
+RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Установка рабочей директории
+# Устанавливаем рабочую директорию
 WORKDIR /app
 
 # Копируем зависимости
 COPY requirements.txt .
 
-# Установка Python-зависимостей
+# Устанавливаем зависимости
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Скачиваем ресурсы для nltk (токенизаторы, стоп-слова и т.д.)
-RUN python -m nltk.downloader punkt stopwords
-
-# Копируем всё приложение
+# Копируем весь проект
 COPY . .
 
-# Переменные окружения (лучше пробрасывать через .env или Railway Secrets)
+# Переменные окружения (подхватит Railway)
 ENV PYTHONUNBUFFERED=1
 
 # Запуск бота
