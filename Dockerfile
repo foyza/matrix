@@ -1,30 +1,27 @@
 # Используем официальный Python образ
 FROM python:3.11-slim
 
-# Устанавливаем зависимости системы
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Устанавливаем зависимости системы (для numpy, pandas, ta, sklearn, tensorflow)
+RUN apt-get update && apt-get install -y \
     build-essential \
-    gcc \
-    g++ \
-    libssl-dev \
-    libffi-dev \
-    wget \
+    libatlas-base-dev \
+    liblapack-dev \
+    gfortran \
     && rm -rf /var/lib/apt/lists/*
 
-# Создаём рабочую директорию
+# Создаем рабочую директорию
 WORKDIR /app
 
-# Копируем зависимости
+# Копируем requirements и ставим зависимости
 COPY requirements.txt .
-
-# Устанавливаем Python-зависимости
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Скачиваем нужные данные для NLTK
-RUN python -m nltk.downloader punkt stopwords
-
-# Копируем код бота
+# Копируем проект
 COPY . .
 
-# Запуск
+# Указываем переменные окружения (чтоб .env подтянулся внутри Railway/докера)
+ENV PYTHONUNBUFFERED=1
+
+# Запуск бота
 CMD ["python", "main.py"]
+
