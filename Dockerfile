@@ -1,26 +1,30 @@
+# Используем официальный Python образ
 FROM python:3.11-slim
 
-WORKDIR /app
-
-# Устанавливаем зависимости для сборки
+# Устанавливаем зависимости системы
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
+    gcc \
+    g++ \
+    libssl-dev \
+    libffi-dev \
+    wget \
     && rm -rf /var/lib/apt/lists/*
 
-# Копируем requirements
+# Создаём рабочую директорию
+WORKDIR /app
+
+# Копируем зависимости
 COPY requirements.txt .
 
-# Ставим Python-зависимости
+# Устанавливаем Python-зависимости
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Качаем nltk ресурсы (после установки nltk!)
+# Скачиваем нужные данные для NLTK
 RUN python -m nltk.downloader punkt stopwords
 
-# Копируем весь проект
+# Копируем код бота
 COPY . .
 
-# Переменные окружения (например для Railway)
-ENV PYTHONUNBUFFERED=1
-
+# Запуск
 CMD ["python", "main.py"]
-
