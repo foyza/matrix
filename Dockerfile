@@ -1,6 +1,6 @@
 FROM python:3.11-slim
 
-# Устанавливаем системные зависимости для numpy/pandas/scikit-learn
+# Устанавливаем системные зависимости для numpy/pandas/scikit-learn/tensorflow
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libblas-dev \
@@ -8,16 +8,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gfortran \
     && rm -rf /var/lib/apt/lists/*
 
-# Устанавливаем рабочую директорию
 WORKDIR /app
 
-# Сначала ставим зависимости
+# Устанавливаем зависимости Python
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --upgrade pip && pip install --no-cache-dir -r requirements.txt
 
-# Копируем код бота
+# Копируем проект
 COPY . .
 
 ENV PYTHONUNBUFFERED=1
 
 CMD ["python", "main.py"]
+
