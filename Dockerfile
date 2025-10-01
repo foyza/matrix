@@ -1,15 +1,14 @@
-# Используем официальный Python образ
-FROM python:3.11-slim
+#FROM python:3.11-slim
 
-# Устанавливаем зависимости системы (для numpy, pandas, ta, sklearn, tensorflow)
+# Устанавливаем системные зависимости (BLAS, LAPACK и компиляторы)
 RUN apt-get update && apt-get install -y \
     build-essential \
-    libatlas-base-dev \
+    libblas-dev \
     liblapack-dev \
     gfortran \
     && rm -rf /var/lib/apt/lists/*
 
-# Создаем рабочую директорию
+# Рабочая директория
 WORKDIR /app
 
 # Копируем requirements и ставим зависимости
@@ -19,9 +18,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Копируем проект
 COPY . .
 
-# Указываем переменные окружения (чтоб .env подтянулся внутри Railway/докера)
 ENV PYTHONUNBUFFERED=1
 
-# Запуск бота
 CMD ["python", "main.py"]
-
