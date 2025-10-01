@@ -180,9 +180,9 @@ async def send_signal(user_id: int):
     if ta_signal in votes: votes[ta_signal] += 1
 
     if votes["BUY"] >= 2:
-        final_signal = "✅ Итог: BUY (совпали 2+ систем)"
+        final_signal = "✅🟢 Итог: BUY (совпали 2 >= систем)"
     elif votes["SELL"] >= 2:
-        final_signal = "❌ Итог: SELL (совпали 2+ систем)"
+        final_signal = "❌🔴 Итог: SELL (совпали 2 >= систем)"
     else:
         final_signal = "⚠️ Сигналы противоречат, лучше ждать"
 
