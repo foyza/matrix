@@ -2,199 +2,175 @@ import os
 import logging
 import asyncio
 import httpx
-import pandas as pd
 import numpy as np
-from datetime import datetime
-from dotenv import load_dotenv
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-
+import pandas as pd
 from aiogram import Bot, Dispatcher, types
 from aiogram.enums import ParseMode
-from aiogram.client.default import DefaultBotProperties
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from aiogram.filters import CommandStart
-
+from aiogram.client.default import DefaultBotProperties
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from dotenv import load_dotenv
 from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
-import ta
+import joblib
 
-# ===============================
-# Загрузка окружения и логирование
-# ===============================
+# ==================== НАСТРОЙКИ ====================
 load_dotenv()
-TOKEN = os.getenv("TELEGRAM_TOKEN")
+TOKEN = os.getenv("BOT_TOKEN")
 API_KEY = os.getenv("TWELVEDATA_API_KEY")
-
-if not TOKEN or not API_KEY:
-    raise ValueError("TELEGRAM_TOKEN или TWELVEDATA_API_KEY не найдены в .env")
 
 logging.basicConfig(level=logging.INFO)
 
-# ===============================
-# Инициализация бота и диспетчера
-# ===============================
 bot = Bot(
     token=TOKEN,
     default=DefaultBotProperties(parse_mode=ParseMode.HTML)
 )
 dp = Dispatcher()
+user_settings = {}  # {uid: {"asset": ..., "muted": False}}
 
-# ===============================
-# Глобальные структуры
-# ===============================
-user_settings = {}  # {uid: {"asset": str, "muted": bool}}
-model = None
-scaler = None
+# ==================== УТИЛИТЫ ====================
+def ensure_user(uid: int):
+    if uid not in user_settings:
+        user_settings[uid] = {"asset": "AAPL", "muted": False}
 
-# ===============================
-# Клавиатура
-# ===============================
-main_kb = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text="📈 Сигнал")],
-        [KeyboardButton(text="⚙️ Настройки"), KeyboardButton(text="🔕 Вкл/Выкл уведомления")],
-        [KeyboardButton(text="💾 Экспорт сигналов")]
-    ],
-    resize_keyboard=True
-)
-
-# ===============================
-# Функции ML и данных
-# ===============================
-async def fetch_data(symbol: str, interval="1h", outputsize=100):
-    url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval={interval}&apikey={API_KEY}&outputsize={outputsize}"
+async def fetch_data(symbol: str = "AAPL", interval="1h", outputsize=100):
+    url = f"https://api.twelvedata.com/time_series"
+    params = {"symbol": symbol, "interval": interval, "apikey": API_KEY, "outputsize": outputsize}
     async with httpx.AsyncClient() as client:
-        r = await client.get(url)
+        r = await client.get(url, params=params)
         data = r.json()
     if "values" not in data:
         return None
     df = pd.DataFrame(data["values"])
-    df["datetime"] = pd.to_datetime(df["datetime"])
-    df = df.sort_values("datetime")
     df["close"] = df["close"].astype(float)
+    df = df[::-1].reset_index(drop=True)
     return df
 
-def prepare_features(df: pd.DataFrame):
-    df["rsi"] = ta.momentum.RSIIndicator(df["close"]).rsi()
-    df["ema"] = ta.trend.EMAIndicator(df["close"], window=14).ema_indicator()
-    df = df.dropna()
-    X = df[["rsi", "ema"]].values
-    y = np.where(df["close"].shift(-1) > df["close"], 1, 0)
-    y = y[:-1]
-    X = X[:-1]
-    return X, y
-
-def train_model(df: pd.DataFrame):
-    global model, scaler
-    X, y = prepare_features(df)
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-    scaler = StandardScaler()
-    X_train = scaler.fit_transform(X_train)
-    model = LogisticRegression()
-    model.fit(X_train, y_train)
-
-def smc_analysis(df: pd.DataFrame):
+def apply_smc_logic(df: pd.DataFrame):
     """
-    Упрощённая логика Smart Money Concepts:
-    - Определяем ликвидность: max/min за последние свечи
-    - Сравниваем текущую цену с уровнями
+    Упрощённая Smart Money Concepts логика:
+    - ищем ликвидность (сильные экстремумы)
+    - смотрим, где были захваты ликвидности
+    - если цена выносила стопы и вернулась — сигнал в сторону возврата
     """
-    recent = df.tail(20)
-    high = recent["close"].max()
-    low = recent["close"].min()
-    last = recent["close"].iloc[-1]
-    if last >= high:
-        return "🟢 Ликвидность выбита сверху (бычий сценарий)"
-    elif last <= low:
-        return "🔴 Ликвидность выбита снизу (медвежий сценарий)"
+    if df is None or len(df) < 5:
+        return "Нет данных"
+    closes = df["close"].values
+    last = closes[-1]
+    prev = closes[-5:]
+
+    high = np.max(prev)
+    low = np.min(prev)
+
+    if last > high:
+        return "BUY (SMC: захват ликвидности сверху)"
+    elif last < low:
+        return "SELL (SMC: захват ликвидности снизу)"
     else:
-        return "⚪ Цена внутри диапазона (наблюдаем)"
+        return "WAIT (SMC: нет сигнала)"
 
-async def send_signal(user_id: int):
-    asset = user_settings.get(user_id, {}).get("asset", "AAPL")
-    df = await fetch_data(asset)
-    if df is None or len(df) < 20:
-        await bot.send_message(user_id, f"Не удалось получить данные по {asset}")
-        return
+def get_ml_signal(df: pd.DataFrame):
+    """
+    Заглушка ML — можно обучать на исторических данных.
+    Сейчас просто LogisticRegression на простых фичах.
+    """
+    closes = df["close"].values
+    X = np.array([[closes[i] - closes[i-1]] for i in range(1, len(closes))])
+    y = np.array([1 if closes[i] > closes[i-1] else 0 for i in range(1, len(closes))])
 
-    if model is None:
-        train_model(df)
+    if len(set(y)) < 2:
+        return "WAIT (ML: данных мало)"
 
-    X, _ = prepare_features(df)
-    X_scaled = scaler.transform([X[-1]])
-    pred = model.predict(X_scaled)[0]
+    model = LogisticRegression()
+    model.fit(X, y)
+    pred = model.predict([[closes[-1] - closes[-2]]])[0]
+    return "BUY (ML)" if pred == 1 else "SELL (ML)"
 
-    smc_text = smc_analysis(df)
-    direction = "🟢 BUY" if pred == 1 else "🔴 SELL"
+def get_signal(df: pd.DataFrame):
+    smc = apply_smc_logic(df)
+    ml = get_ml_signal(df)
+    return f"{smc} | {ml}"
 
-    signal = (
-        f"📊 Сигнал по {asset}\n"
-        f"{direction}\n"
-        f"{smc_text}\n"
-        f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-    )
-
-    await bot.send_message(user_id, signal)
-
-    # Экспорт в CSV
-    with open("signals.csv", "a", encoding="utf-8") as f:
-        f.write(f"{datetime.now()},{asset},{direction},{smc_text}\n")
-
-# ===============================
-# Хэндлеры
-# ===============================
+# ==================== ХЕНДЛЕРЫ ====================
 @dp.message(CommandStart())
 async def start_cmd(message: types.Message):
-    user_settings[message.from_user.id] = {"asset": "AAPL", "muted": False}
-    await message.answer("Привет! Я бот для трейдинга с SMC и ML 📈", reply_markup=main_kb)
+    uid = message.from_user.id
+    ensure_user(uid)
+
+    kb = ReplyKeyboardMarkup(resize_keyboard=True)
+    kb.add(KeyboardButton("📈 Сигнал"))
+    kb.add(KeyboardButton("⚙️ Настройки"))
+    kb.add(KeyboardButton("🔕 Вкл/Выкл уведомления"))
+
+    await message.answer("Привет! Я бот для сигналов 📊\nВыберите действие:", reply_markup=kb)
 
 @dp.message(lambda m: m.text == "📈 Сигнал")
 async def signal_cmd(message: types.Message):
-    await send_signal(message.from_user.id)
+    uid = message.from_user.id
+    ensure_user(uid)
+
+    asset = user_settings[uid]["asset"]
+    df = await fetch_data(asset)
+    sig = get_signal(df)
+    await message.answer(f"Сигнал по {asset}: {sig}")
 
 @dp.message(lambda m: m.text == "⚙️ Настройки")
 async def settings_cmd(message: types.Message):
-    await message.answer("Напиши тикер актива (например, AAPL, BTC/USD):")
+    uid = message.from_user.id
+    ensure_user(uid)
+
+    kb = ReplyKeyboardMarkup(resize_keyboard=True)
+    kb.add(KeyboardButton("AAPL"), KeyboardButton("BTC/USD"))
+    kb.add(KeyboardButton("Назад"))
+
+    await message.answer("Выберите актив:", reply_markup=kb)
+
+@dp.message(lambda m: m.text in ["AAPL", "BTC/USD"])
+async def set_asset(message: types.Message):
+    uid = message.from_user.id
+    ensure_user(uid)
+    user_settings[uid]["asset"] = message.text
+    await message.answer(f"Актив изменён на {message.text}")
+
+@dp.message(lambda m: m.text == "Назад")
+async def back_cmd(message: types.Message):
+    uid = message.from_user.id
+    ensure_user(uid)
+
+    kb = ReplyKeyboardMarkup(resize_keyboard=True)
+    kb.add(KeyboardButton("📈 Сигнал"))
+    kb.add(KeyboardButton("⚙️ Настройки"))
+    kb.add(KeyboardButton("🔕 Вкл/Выкл уведомления"))
+
+    await message.answer("Вы вернулись в меню", reply_markup=kb)
 
 @dp.message(lambda m: m.text == "🔕 Вкл/Выкл уведомления")
 async def mute_cmd(message: types.Message):
     uid = message.from_user.id
+    ensure_user(uid)
+
     user_settings[uid]["muted"] = not user_settings[uid]["muted"]
     status = "🔔 Включены" if not user_settings[uid]["muted"] else "🔕 Выключены"
     await message.answer(f"Уведомления: {status}")
 
-@dp.message(lambda m: m.text == "💾 Экспорт сигналов")
-async def export_cmd(message: types.Message):
-    if os.path.exists("signals.csv"):
-        await message.answer_document(types.FSInputFile("signals.csv"))
-    else:
-        await message.answer("Сигналы пока не сохранены.")
+# ==================== РАССЫЛКА ====================
+async def broadcast_signal():
+    for uid, settings in list(user_settings.items()):
+        if settings.get("muted"):
+            continue
+        asset = settings.get("asset", "AAPL")
+        df = await fetch_data(asset)
+        sig = get_signal(df)
+        try:
+            await bot.send_message(uid, f"Автосигнал по {asset}: {sig}")
+        except Exception as e:
+            logging.error(f"Не удалось отправить {uid}: {e}")
 
-@dp.message()
-async def custom_asset(message: types.Message):
-    uid = message.from_user.id
-    if uid in user_settings:
-        user_settings[uid]["asset"] = message.text.strip().upper()
-        await message.answer(f"Ассет изменён на {user_settings[uid]['asset']}")
-
-# ===============================
-# Планировщик
-# ===============================
-async def scheduler_task():
-    scheduler = AsyncIOScheduler()
-    scheduler.add_job(
-        lambda: [asyncio.create_task(send_signal(uid)) for uid, s in user_settings.items() if not s["muted"]],
-        "interval",
-        minutes=60
-    )
-    scheduler.start()
-
-# ===============================
-# Точка входа
-# ===============================
+# ==================== MAIN ====================
 async def main():
-    await scheduler_task()
+    scheduler = AsyncIOScheduler()
+    scheduler.add_job(lambda: asyncio.create_task(broadcast_signal()), "interval", hours=1)
+    scheduler.start()
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
