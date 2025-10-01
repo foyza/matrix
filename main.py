@@ -209,7 +209,7 @@ async def send_signal(user_id: int):
 async def start_cmd(message: types.Message):
     if message.from_user.id not in user_settings:
         user_settings[message.from_user.id] = {"asset": "AAPL", "muted": False}
-    await message.answer("Привет! Я бот для трейдинга (SMC + TA + ML) 📈", reply_markup=main_kb)
+    await message.answer("Escape the MATRIX", reply_markup=main_kb)
 
 @dp.message(lambda m: m.text == "📈 Сигнал")
 async def signal_cmd(message: types.Message):
