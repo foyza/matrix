@@ -1,0 +1,22 @@
+symbols:
+  - BTCUSDT
+  - ETHUSDT  
+  - ADAUSDT
+  - SOLUSDT
+  - XRPUSDT
+
+whale_detection:
+  volume_multiplier: 5.0
+  cluster_window: 30
+  min_cluster_trades: 2
+  confidence_threshold: 0.7
+
+notifications:
+  telegram:
+    enabled: true
+    format: "detailed"
+
+signal_filters:
+  enable_volume_filter: true
+  min_volume_ratio: 3.0
+  enable_volatility_filter: true
