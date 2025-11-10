@@ -8,7 +8,8 @@ def load_config() -> Dict[str, Any]:
     
     # Базовые настройки
     config = {
-        'symbols': ['BTCUSDT', 'ETHUSDT', 'ADAUSDT', 'SOLUSDT', 'XRPUSDT'],
+        'symbols': ['BTC/USDT', 'ETH/USDT', 'ADA/USDT', 'SOL/USDT', 'XRP/USDT'],
+        'exchange': os.getenv('EXCHANGE', 'bybit'),  # bybit, kucoin, okx
         'whale_detection': {
             'volume_multiplier': float(os.getenv('WHALE_VOLUME_MULTIPLIER', '5.0')),
             'cluster_window': int(os.getenv('CLUSTER_WINDOW_SECONDS', '30')),
@@ -19,9 +20,6 @@ def load_config() -> Dict[str, Any]:
             'telegram': {
                 'enabled': bool(os.getenv('TELEGRAM_BOT_TOKEN')),
                 'format': 'detailed'
-            },
-            'slack': {
-                'enabled': False
             }
         },
         'CHECK_INTERVAL': int(os.getenv('CHECK_INTERVAL', '10'))
@@ -37,7 +35,7 @@ def load_config() -> Dict[str, Any]:
     
     # Переменные окружения
     env_vars = [
-        'TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID'
+        'TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID', 'EXCHANGE'
     ]
     
     for var in env_vars:
