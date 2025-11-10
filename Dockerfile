@@ -1,23 +1,33 @@
-FROM python:3.11-slim
+FROM python:3.9-slim
 
-# Устанавливаем системные зависимости для numpy/pandas/scikit-learn/tensorflow
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    libblas-dev \
-    liblapack-dev \
-    gfortran \
+# Установка системных зависимостей для MT5
+RUN apt-get update && apt-get install -y \
+    wget \
+    gnupg \
+    software-properties-common \
     && rm -rf /var/lib/apt/lists/*
 
+# Установка Wine для MetaTrader (если нужно эмулировать Windows)
+RUN dpkg --add-architecture i386 && \
+    apt-get update && \
+    apt-get install -y wine wine32
+
+# Создание рабочей директории
 WORKDIR /app
 
-# Устанавливаем зависимости Python
+# Копирование requirements и установка Python зависимостей
 COPY requirements.txt .
-RUN pip install --upgrade pip && pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Копируем проект
+# Копирование исходного кода
 COPY . .
 
+# Создание директорий для логов и данных
+RUN mkdir -p /app/logs /app/data
+
+# Переменные окружения
+ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
 
-CMD ["python", "main.py"]
-
+# Запуск бота
+CMD ["python", "src/main.py"]
