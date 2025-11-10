@@ -5,7 +5,7 @@ symbols:
   - SOL/USDT
   - XRP/USDT
 
-exchange: "bybit"
+exchange: "kucoin"
 
 whale_detection:
   volume_multiplier: 5.0
