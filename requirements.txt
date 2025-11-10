@@ -5,7 +5,8 @@ python-dotenv==1.0.0
 python-telegram-bot==20.7
 
 # Данные с бирж
-twelvedata==1.4.1
+twelvedata==1.2.25
+aiohttp==3.9.1
 requests==2.31.0
 
 # Анализ данных
