@@ -1,267 +1,244 @@
-import os
-import logging
-import asyncio
-import httpx
+import MetaTrader5 as mt5
 import pandas as pd
 import numpy as np
-from datetime import datetime
-from dotenv import load_dotenv
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from datetime import datetime, timedelta
+import logging
+from dataclasses import dataclass
+from typing import Dict, List, Optional
+import asyncio
 
-from aiogram import Bot, Dispatcher, types
-from aiogram.enums import ParseMode
-from aiogram.client.default import DefaultBotProperties
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
-from aiogram.filters import CommandStart
+@dataclass
+class RiskParameters:
+    max_daily_loss: float = 0.02  # 2%
+    max_position_size: float = 0.1  # 10% капитала
+    max_drawdown: float = 0.05  # 5%
+    max_open_positions: int = 3
 
-from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
-import ta
-
-# ===============================
-# Загрузка окружения и логирование
-# ===============================
-load_dotenv()
-TOKEN = os.getenv("TELEGRAM_TOKEN")
-API_KEY = os.getenv("TWELVEDATA_API_KEY")
-
-if not TOKEN or not API_KEY:
-    raise ValueError("TELEGRAM_TOKEN или TWELVEDATA_API_KEY не найдены в .env")
-
-logging.basicConfig(level=logging.INFO)
-
-# ===============================
-# Инициализация бота и диспетчера
-# ===============================
-bot = Bot(
-    token=TOKEN,
-    default=DefaultBotProperties(parse_mode=ParseMode.HTML)
-)
-dp = Dispatcher()
-
-# ===============================
-# Глобальные структуры
-# ===============================
-user_settings = {}  # {uid: {"asset": str, "muted": bool}}
-model = None
-scaler = None
-
-# ===============================
-# Клавиатура
-# ===============================
-main_kb = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text="📈 Сигнал")],
-        [KeyboardButton(text="⚙️ Настройки"), KeyboardButton(text="🔕 Вкл/Выкл уведомления")],
-        [KeyboardButton(text="💾 Экспорт сигналов")]
-    ],
-    resize_keyboard=True
-)
-
-# ===============================
-# Функции работы с данными
-# ===============================
-async def fetch_data(symbol: str, interval="1h", outputsize=150):
-    url = f"https://api.twelvedata.com/time_series?symbol={symbol}&interval={interval}&apikey={API_KEY}&outputsize={outputsize}"
-    async with httpx.AsyncClient() as client:
-        r = await client.get(url)
-        data = r.json()
-    if "values" not in data:
+class ProfessionalWhaleBot:
+    def __init__(self, symbol: str = "BTCUSD", risk_params: RiskParameters = None):
+        self.symbol = symbol
+        self.risk_params = risk_params or RiskParameters()
+        self.setup_logging()
+        self.initialize_mt5()
+        
+        # Trading state
+        self.daily_pnl = 0.0
+        self.open_positions = []
+        self.signals_cache = []
+        
+    def setup_logging(self):
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(levelname)s - %(message)s',
+            handlers=[
+                logging.FileHandler('whale_bot.log'),
+                logging.StreamHandler()
+            ]
+        )
+        self.logger = logging.getLogger(__name__)
+    
+    def initialize_mt5(self):
+        if not mt5.initialize():
+            self.logger.error("MT5 initialization failed")
+            raise Exception("MT5 init failed")
+        self.logger.info("MT5 initialized successfully")
+    
+    def get_market_data(self, timeframe=mt5.TIMEFRAME_M1, count=100) -> pd.DataFrame:
+        """Получение рыночных данных"""
+        rates = mt5.copy_rates_from_pos(self.symbol, timeframe, 0, count)
+        if rates is None:
+            self.logger.error("Failed to get market data")
+            return pd.DataFrame()
+        
+        df = pd.DataFrame(rates)
+        df['time'] = pd.to_datetime(df['time'], unit='s')
+        return df
+    
+    def calculate_advanced_indicators(self, df: pd.DataFrame) -> Dict:
+        """Расчет продвинутых индикаторов"""
+        if df.empty:
+            return {}
+            
+        # Volume analysis
+        df['volume_sma'] = df['tick_volume'].rolling(20).mean()
+        df['volume_ratio'] = df['tick_volume'] / df['volume_sma']
+        
+        # Price momentum
+        df['returns'] = df['close'].pct_change()
+        df['volatility'] = df['returns'].rolling(20).std()
+        
+        # Support/Resistance
+        df['resistance'] = df['high'].rolling(20).max()
+        df['support'] = df['low'].rolling(20).min()
+        
+        current = df.iloc[-1]
+        signals = {
+            'volume_spike': current['volume_ratio'] > 2.0,
+            'high_volatility': current['volatility'] > df['volatility'].quantile(0.8),
+            'near_resistance': abs(current['close'] - current['resistance']) / current['close'] < 0.002,
+            'near_support': abs(current['close'] - current['support']) / current['close'] < 0.002,
+            'trend': 1 if current['close'] > df['close'].rolling(50).mean().iloc[-1] else -1
+        }
+        
+        return signals
+    
+    def detect_whale_activity(self, df: pd.DataFrame) -> Dict:
+        """Обнаружение китовой активности"""
+        if len(df) < 50:
+            return {}
+            
+        # Анализ больших свечей
+        recent_candles = df.tail(5)
+        large_candles = recent_candles[
+            (recent_candles['high'] - recent_candles['low']) > 
+            df['high'].rolling(20).mean().iloc[-1] * 1.5
+        ]
+        
+        # Анализ объема
+        volume_spike = df['tick_volume'].iloc[-1] > df['tick_volume'].rolling(20).mean().iloc[-1] * 2
+        
+        return {
+            'whale_detected': len(large_candles) > 0 and volume_spike,
+            'direction': 1 if large_candles['close'].iloc[-1] > large_candles['open'].iloc[-1] else -1,
+            'confidence': min(len(large_candles) / 5.0, 1.0)
+        }
+    
+    def calculate_position_size(self, confidence: float) -> float:
+        """Расчет размера позиции на основе уверенности и риска"""
+        account_info = mt5.account_info()
+        if account_info is None:
+            return 0.0
+            
+        equity = account_info.equity
+        max_risk_amount = equity * self.risk_params.max_position_size
+        
+        # Размер основан на уверенности сигнала
+        size_multiplier = min(confidence, 1.0)
+        position_size = max_risk_amount * size_multiplier
+        
+        self.logger.info(f"Calculated position size: {position_size:.2f}")
+        return position_size
+    
+    def execute_trade(self, direction: str, confidence: float):
+        """Исполнение сделки с управлением рисками"""
+        if len(self.open_positions) >= self.risk_params.max_open_positions:
+            self.logger.warning("Max open positions reached")
+            return
+            
+        if self.daily_pnl < -self.risk_params.max_daily_loss * mt5.account_info().equity:
+            self.logger.error("Daily loss limit exceeded")
+            return
+        
+        # Расчет размера позиции
+        lot_size = self.calculate_position_size(confidence)
+        if lot_size <= 0:
+            return
+            
+        # Определение цены и стоп-лоссов
+        current_price = mt5.symbol_info_tick(self.symbol).bid
+        spread = mt5.symbol_info(self.symbol).spread * mt5.symbol_info(self.symbol).point
+        
+        if direction == "BUY":
+            sl = current_price * 0.99  # 1% стоп-лосс
+            tp = current_price * 1.02  # 2% тейк-профит
+        else:
+            sl = current_price * 1.01
+            tp = current_price * 0.98
+        
+        # Отправка ордера
+        request = {
+            "action": mt5.TRADE_ACTION_DEAL,
+            "symbol": self.symbol,
+            "volume": lot_size,
+            "type": mt5.ORDER_TYPE_BUY if direction == "BUY" else mt5.ORDER_TYPE_SELL,
+            "price": current_price,
+            "sl": sl,
+            "tp": tp,
+            "deviation": 10,
+            "magic": 12345,
+            "comment": f"WhaleBot_{direction}",
+            "type_time": mt5.ORDER_TIME_GTC,
+            "type_filling": mt5.ORDER_FILLING_IOC,
+        }
+        
+        result = mt5.order_send(request)
+        if result.retcode != mt5.TRADE_RETCODE_DONE:
+            self.logger.error(f"Trade execution failed: {result.retcode}")
+        else:
+            self.logger.info(f"Trade executed: {direction} {lot_size} lots")
+            self.open_positions.append(result.order)
+    
+    def monitor_positions(self):
+        """Мониторинг открытых позиций"""
+        positions = mt5.positions_get(symbol=self.symbol)
+        self.open_positions = [pos.ticket for pos in positions] if positions else []
+        
+        # Обновление дневного PnL
+        total_pnl = sum(pos.profit for pos in positions) if positions else 0
+        self.daily_pnl = total_pnl
+    
+    def trading_decision(self) -> Optional[str]:
+        """Принятие торгового решения"""
+        df = self.get_market_data()
+        if df.empty:
+            return None
+        
+        indicators = self.calculate_advanced_indicators(df)
+        whale_signals = self.detect_whale_activity(df)
+        
+        if not whale_signals.get('whale_detected', False):
+            return None
+        
+        direction = "BUY" if whale_signals['direction'] > 0 else "SELL"
+        confidence = whale_signals['confidence']
+        
+        # Фильтры ложных сигналов
+        if indicators.get('near_resistance', False) and direction == "BUY":
+            self.logger.info("Filtered: Buy signal near resistance")
+            return None
+            
+        if indicators.get('near_support', False) and direction == "SELL":
+            self.logger.info("Filtered: Sell signal near support")
+            return None
+        
+        # Только высококачественные сигналы
+        if confidence > 0.7 and indicators.get('volume_spike', False):
+            return direction
+        elif confidence > 0.8:  # Очень уверенные сигналы
+            return direction
+            
         return None
-    df = pd.DataFrame(data["values"])
-    df["datetime"] = pd.to_datetime(df["datetime"])
-    df = df.sort_values("datetime")
-    df["close"] = df["close"].astype(float)
-    return df
+    
+    def run(self):
+        """Основной цикл торговли"""
+        self.logger.info("Starting Professional Whale Bot")
+        
+        try:
+            while True:
+                self.monitor_positions()
+                
+                decision = self.trading_decision()
+                if decision:
+                    self.execute_trade(decision, 0.7)  # Базовая уверенность
+                
+                # Пауза между анализами
+                mt5.sleep(5000)  # 5 секунд
+                
+        except KeyboardInterrupt:
+            self.logger.info("Bot stopped by user")
+        except Exception as e:
+            self.logger.error(f"Bot error: {e}")
+        finally:
+            mt5.shutdown()
 
-# ===============================
-# ML-модель
-# ===============================
-def prepare_features(df: pd.DataFrame):
-    df["rsi"] = ta.momentum.RSIIndicator(df["close"]).rsi()
-    df["ema"] = ta.trend.EMAIndicator(df["close"], window=14).ema_indicator()
-    df = df.dropna()
-    X = df[["rsi", "ema"]].values
-    y = np.where(df["close"].shift(-1) > df["close"], 1, 0)
-    y = y[:-1]
-    X = X[:-1]
-    return X, y
-
-def train_model(df: pd.DataFrame):
-    global model, scaler
-    X, y = prepare_features(df)
-    X_train, _, y_train, _ = train_test_split(X, y, test_size=0.2, random_state=42)
-    scaler = StandardScaler()
-    X_train = scaler.fit_transform(X_train)
-    model = LogisticRegression()
-    model.fit(X_train, y_train)
-
-# ===============================
-# Smart Money Concepts (SMC)
-# ===============================
-def smc_analysis(df: pd.DataFrame):
-    recent = df.tail(20)
-    high = recent["close"].max()
-    low = recent["close"].min()
-    last = recent["close"].iloc[-1]
-    if last >= high:
-        return "🟢 Ликвидность выбита сверху (бычий сценарий)"
-    elif last <= low:
-        return "🔴 Ликвидность выбита снизу (медвежий сценарий)"
-    else:
-        return "⚪ Цена внутри диапазона (наблюдаем)"
-
-# ===============================
-# Технический анализ (TA)
-# ===============================
-def technical_analysis(df: pd.DataFrame):
-    rsi = ta.momentum.RSIIndicator(df["close"]).rsi().iloc[-1]
-    ema = ta.trend.EMAIndicator(df["close"], window=14).ema_indicator().iloc[-1]
-    ma = ta.trend.SMAIndicator(df["close"], window=50).sma_indicator().iloc[-1]
-    last = df["close"].iloc[-1]
-
-    signals = []
-    if rsi < 30:
-        signals.append("🟢 RSI перепродан → BUY")
-    elif rsi > 70:
-        signals.append("🔴 RSI перекуплен → SELL")
-
-    if last > ema:
-        signals.append("🟢 Цена выше EMA → BUY")
-    else:
-        signals.append("🔴 Цена ниже EMA → SELL")
-
-    if last > ma:
-        signals.append("🟢 Цена выше SMA(50) → BUY")
-    else:
-        signals.append("🔴 Цена ниже SMA(50) → SELL")
-
-    return "\n".join(signals)
-
-# ===============================
-# Отправка сигнала пользователю (с агрегированием)
-# ===============================
-async def send_signal(user_id: int):
-    asset = user_settings.get(user_id, {}).get("asset", "AAPL")
-    df = await fetch_data(asset)
-    if df is None or len(df) < 50:
-        await bot.send_message(user_id, f"Не удалось получить данные по {asset}")
-        return
-
-    if model is None:
-        train_model(df)
-
-    # ML прогноз
-    X, _ = prepare_features(df)
-    X_scaled = scaler.transform([X[-1]])
-    pred = model.predict(X_scaled)[0]
-    ml_signal = "BUY" if pred == 1 else "SELL"
-
-    # SMC анализ
-    smc_text = smc_analysis(df)
-    if "бычий" in smc_text:
-        smc_signal = "BUY"
-    elif "медвежий" in smc_text:
-        smc_signal = "SELL"
-    else:
-        smc_signal = "NEUTRAL"
-
-    # Технический анализ
-    ta_text = technical_analysis(df)
-    buy_votes = ta_text.count("BUY")
-    sell_votes = ta_text.count("SELL")
-    ta_signal = "BUY" if buy_votes > sell_votes else "SELL" if sell_votes > buy_votes else "NEUTRAL"
-
-    # Итоговое решение
-    votes = {"BUY": 0, "SELL": 0}
-    if ml_signal in votes: votes[ml_signal] += 1
-    if smc_signal in votes: votes[smc_signal] += 1
-    if ta_signal in votes: votes[ta_signal] += 1
-
-    if votes["BUY"] >= 2:
-        final_signal = "✅🟢 Итог: BUY (совпали 2 >= систем)"
-    elif votes["SELL"] >= 2:
-        final_signal = "❌🔴 Итог: SELL (совпали 2 >= систем)"
-    else:
-        final_signal = "⚠️ Сигналы противоречат, лучше ждать"
-
-    # Формирование ответа
-    signal = (
-        f"📊 Сигнал по {asset}\n\n"
-        f"{final_signal}\n\n"
-        f"🤖 ML → {ml_signal}\n"
-        f"🏦 SMC → {smc_signal} ({smc_text})\n"
-        f"📉 TA → {ta_signal}\n\n"
-        f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-    )
-
-    await bot.send_message(user_id, signal)
-
-    # Экспорт в CSV
-    with open("signals.csv", "a", encoding="utf-8") as f:
-        f.write(f"{datetime.now()},{asset},{final_signal},{ml_signal},{smc_signal},{ta_signal}\n")
-
-# ===============================
-# Хэндлеры
-# ===============================
-@dp.message(CommandStart())
-async def start_cmd(message: types.Message):
-    if message.from_user.id not in user_settings:
-        user_settings[message.from_user.id] = {"asset": "AAPL", "muted": False}
-    await message.answer("Escape the MATRIX", reply_markup=main_kb)
-
-@dp.message(lambda m: m.text == "📈 Сигнал")
-async def signal_cmd(message: types.Message):
-    await send_signal(message.from_user.id)
-
-@dp.message(lambda m: m.text == "⚙️ Настройки")
-async def settings_cmd(message: types.Message):
-    if message.from_user.id not in user_settings:
-        user_settings[message.from_user.id] = {"asset": "AAPL", "muted": False}
-    await message.answer("Напиши тикер актива (например, AAPL, BTC/USD):")
-
-@dp.message(lambda m: m.text == "🔕 Вкл/Выкл уведомления")
-async def mute_cmd(message: types.Message):
-    uid = message.from_user.id
-    if uid not in user_settings:
-        user_settings[uid] = {"asset": "AAPL", "muted": False}
-    user_settings[uid]["muted"] = not user_settings[uid]["muted"]
-    status = "🔔 Включены" if not user_settings[uid]["muted"] else "🔕 Выключены"
-    await message.answer(f"Уведомления: {status}")
-
-@dp.message(lambda m: m.text == "💾 Экспорт сигналов")
-async def export_cmd(message: types.Message):
-    if os.path.exists("signals.csv"):
-        await message.answer_document(types.FSInputFile("signals.csv"))
-    else:
-        await message.answer("Сигналы пока не сохранены.")
-
-@dp.message()
-async def custom_asset(message: types.Message):
-    uid = message.from_user.id
-    if uid in user_settings:
-        user_settings[uid]["asset"] = message.text.strip().upper()
-        await message.answer(f"Ассет изменён на {user_settings[uid]['asset']}")
-
-# ===============================
-# Планировщик
-# ===============================
-async def scheduler_task():
-    scheduler = AsyncIOScheduler()
-    scheduler.add_job(
-        lambda: [asyncio.create_task(send_signal(uid)) for uid, s in user_settings.items() if not s["muted"]],
-        "interval",
-        minutes=60
-    )
-    scheduler.start()
-
-# ===============================
-# Точка входа
-# ===============================
-async def main():
-    await scheduler_task()
-    await dp.start_polling(bot)
-
+# Использование
 if __name__ == "__main__":
-    asyncio.run(main())
+    risk_params = RiskParameters(
+        max_daily_loss=0.01,  # 1%
+        max_position_size=0.05,  # 5%
+        max_drawdown=0.03,  # 3%
+        max_open_positions=2
+    )
+    
+    bot = ProfessionalWhaleBot(symbol="BTCUSD", risk_params=risk_params)
+    bot.run()
