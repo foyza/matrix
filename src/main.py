@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Whale Signal Bot - Обнаружение китовых сделок через Bybit
+Whale Signal Bot - Обнаружение китовых сделок через KuCoin
 Только сигналы, без торговли
 """
 
@@ -9,6 +9,7 @@ import logging
 import time
 from datetime import datetime
 from typing import Dict, List, Optional
+import os
 
 import pandas as pd
 import numpy as np
@@ -29,23 +30,56 @@ class WhaleSignalBot:
         self.signal_generator = SignalGenerator(self.config)
         self.notifier = NotificationManager(self.config)
         
-        # Инициализация биржи (Bybit вместо Binance)
-        self.exchange = ccxt.bybit({
-            'enableRateLimit': True,
-            'options': {
-                'defaultType': 'spot'  # или 'future' для фьючерсов
-            }
-        })
+        # Настройка биржи
+        self.exchange = self._setup_exchange()
         
         # Состояние бота
         self.last_signals = {}
         self.symbols = self.config['symbols']
         
+    def _setup_exchange(self):
+        """Настройка подключения к бирже"""
+        exchange_name = self.config.get('exchange', 'kucoin')
+        
+        exchange_config = {
+            'enableRateLimit': True,
+            'timeout': 30000,
+        }
+        
+        # Добавляем прокси если указан
+        proxy_url = os.getenv('PROXY_URL')
+        if proxy_url:
+            exchange_config['proxies'] = {
+                'http': proxy_url,
+                'https': proxy_url,
+            }
+        
+        if exchange_name == 'kucoin':
+            return ccxt.kucoin(exchange_config)
+        elif exchange_name == 'okx':
+            return ccxt.okx(exchange_config)
+        elif exchange_name == 'gateio':
+            return ccxt.gateio(exchange_config)
+        elif exchange_name == 'mexc':
+            return ccxt.mexc(exchange_config)
+        elif exchange_name == 'huobi':
+            return ccxt.huobi(exchange_config)
+        else:
+            # По умолчанию KuCoin
+            return ccxt.kucoin(exchange_config)
+    
     async def get_market_data(self, symbol: str, limit: int = 100) -> pd.DataFrame:
         """Получение рыночных данных с биржи"""
         try:
+            # Нормализуем символ для биржи
+            normalized_symbol = self.exchange.symbol(symbol)
+            
             # Получаем свечи (1 минута)
-            ohlcv = await self.exchange.fetch_ohlcv(symbol, '1m', limit=limit)
+            ohlcv = await self.exchange.fetch_ohlcv(normalized_symbol, '1m', limit=limit)
+            
+            if not ohlcv:
+                self.logger.warning(f"Нет данных для {symbol}")
+                return pd.DataFrame()
             
             df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
             df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
@@ -60,7 +94,8 @@ class WhaleSignalBot:
     async def get_recent_trades(self, symbol: str, limit: int = 50) -> List[Dict]:
         """Получение последних сделок"""
         try:
-            trades = await self.exchange.fetch_trades(symbol, limit=limit)
+            normalized_symbol = self.exchange.symbol(symbol)
+            trades = await self.exchange.fetch_trades(normalized_symbol, limit=limit)
             return trades
         except Exception as e:
             self.logger.error(f"Ошибка получения сделок {symbol}: {e}")
@@ -122,11 +157,30 @@ class WhaleSignalBot:
         
         return signals_found
     
+    async def test_connection(self):
+        """Тест подключения к бирже"""
+        try:
+            # Пробуем загрузить тикер для первого символа
+            if self.symbols:
+                test_symbol = self.symbols[0]
+                ticker = await self.exchange.fetch_ticker(test_symbol)
+                self.logger.info(f"✅ Подключение к {self.exchange.name} успешно")
+                self.logger.info(f"📊 Тестовый тикер {test_symbol}: {ticker['last']}")
+                return True
+        except Exception as e:
+            self.logger.error(f"❌ Ошибка подключения к {self.exchange.name}: {e}")
+            return False
+    
     async def run(self):
         """Основной цикл бота"""
         self.logger.info("🚀 Запуск Whale Signal Bot...")
         self.logger.info(f"📊 Мониторинг символов: {', '.join(self.symbols)}")
         self.logger.info(f"🏦 Используется биржа: {self.exchange.name}")
+        
+        # Тестируем подключение
+        if not await self.test_connection():
+            self.logger.error("Не удалось подключиться к бирже. Проверьте настройки.")
+            return
         
         try:
             while True:
