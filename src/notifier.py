@@ -73,6 +73,10 @@ class NotificationManager:
 • Кластер: `{signal['cluster_size']}` крупных свеч
 • Волатильность: `{signal['price_impact']:.2f}%`
 
+*Уровни:*
+• Стоп-лосс: `${signal['stop_loss']:,.4f}`
+• Тейк-профит: `${signal['take_profit']:,.4f}`
+
 *Рекомендация:*
 Рассмотреть вход в направлении *{signal['direction']}*
 
