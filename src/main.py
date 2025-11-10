@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Whale Signal Bot - Обнаружение китовых сделок через Binance/Bybit
+Whale Signal Bot - Обнаружение китовых сделок через Bybit
 Только сигналы, без торговли
 """
 
@@ -29,11 +29,12 @@ class WhaleSignalBot:
         self.signal_generator = SignalGenerator(self.config)
         self.notifier = NotificationManager(self.config)
         
-        # Инициализация биржи (Binance)
-        self.exchange = ccxt.binance({
+        # Инициализация биржи (Bybit вместо Binance)
+        self.exchange = ccxt.bybit({
             'enableRateLimit': True,
-            # 'apiKey': 'your_key',  # Не нужно для публичных данных
-            # 'secret': 'your_secret',
+            'options': {
+                'defaultType': 'spot'  # или 'future' для фьючерсов
+            }
         })
         
         # Состояние бота
@@ -125,6 +126,7 @@ class WhaleSignalBot:
         """Основной цикл бота"""
         self.logger.info("🚀 Запуск Whale Signal Bot...")
         self.logger.info(f"📊 Мониторинг символов: {', '.join(self.symbols)}")
+        self.logger.info(f"🏦 Используется биржа: {self.exchange.name}")
         
         try:
             while True:
