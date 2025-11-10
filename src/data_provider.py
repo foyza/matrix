@@ -53,9 +53,11 @@ class TwelveDataProvider:
                     df['close'] = pd.to_numeric(df['close'])
                     df['volume'] = pd.to_numeric(df['volume'])
                     
+                    self.logger.debug(f"Получено {len(df)} свечей для {symbol}")
                     return df
                 else:
-                    self.logger.error(f"Ошибка API для {symbol}: {response.status}")
+                    error_text = await response.text()
+                    self.logger.error(f"Ошибка API для {symbol}: {response.status} - {error_text}")
                     return pd.DataFrame()
                     
         except Exception as e:
@@ -76,6 +78,8 @@ class TwelveDataProvider:
                     data = await response.json()
                     return float(data.get('price', 0))
                 else:
+                    error_text = await response.text()
+                    self.logger.error(f"Ошибка получения цены для {symbol}: {error_text}")
                     return None
                     
         except Exception as e:
@@ -100,9 +104,12 @@ class TwelveDataProvider:
                         'volume': float(data.get('volume', 0)),
                         'change': float(data.get('percent_change', 0)),
                         'high': float(data.get('high', 0)),
-                        'low': float(data.get('low', 0))
+                        'low': float(data.get('low', 0)),
+                        'open': float(data.get('open', 0))
                     }
                 else:
+                    error_text = await response.text()
+                    self.logger.error(f"Ошибка получения котировки для {symbol}: {error_text}")
                     return None
                     
         except Exception as e:
@@ -112,6 +119,7 @@ class TwelveDataProvider:
     async def test_connection(self) -> bool:
         """Тест подключения к API"""
         try:
+            # Пробуем получить цену BTC
             price = await self.get_realtime_price('BTC/USD')
             if price and price > 0:
                 self.logger.info(f"✅ Twelvedata подключение успешно. BTC цена: ${price:,.2f}")
