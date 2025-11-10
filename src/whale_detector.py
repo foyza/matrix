@@ -86,22 +86,24 @@ class WhaleDetector:
         avg_range = (df['high'] - df['low']).tail(20).mean()
         avg_volume = df['volume'].tail(20).mean()
         
-        large_candles = df[
-            ((df['high'] - df['low']) > avg_range * 1.5) &
-            (df['volume'] > avg_volume * 2.0)
-        ].tail(5)
+        # Анализируем последние 5 свечей
+        recent_candles = df.tail(5)
+        
+        large_candles = recent_candles[
+            ((recent_candles['high'] - recent_candles['low']) > avg_range * 1.5) &
+            (recent_candles['volume'] > avg_volume * 2.0)
+        ]
         
         cluster_detected = len(large_candles) >= 2
         cluster_size = len(large_candles)
         
         return {
             'cluster_detected': cluster_detected,
-            'cluster_size': cluster_size,
-            'large_candles': large_candles
+            'cluster_size': cluster_size
         }
     
     def _analyze_price_movement(self, df: pd.DataFrame) -> Dict[str, Any]:
-        """Анализ движения цены"""
+        """Анализ движения цены без TA-Lib"""
         if len(df) < 5:
             return {'price_change_pct': 0.0, 'trend': 'NEUTRAL'}
         
@@ -109,9 +111,12 @@ class WhaleDetector:
         prev_price = df['close'].iloc[-5]
         price_change_pct = (current_price - prev_price) / prev_price * 100
         
-        # Определение тренда по EMA
-        ema_9 = df['close'].ewm(span=9).mean().iloc[-1]
-        ema_21 = df['close'].ewm(span=21).mean().iloc[-1]
+        # EMA расчет без TA-Lib
+        def calculate_ema(series, period):
+            return series.ewm(span=period, adjust=False).mean()
+        
+        ema_9 = calculate_ema(df['close'], 9).iloc[-1]
+        ema_21 = calculate_ema(df['close'], 21).iloc[-1]
         
         if ema_9 > ema_21 and price_change_pct > 0:
             trend = 'LONG'
@@ -149,3 +154,17 @@ class WhaleDetector:
         confidence += 0.3 * price_strength
         
         return min(confidence, 1.0)
+    
+    def _calculate_atr(self, df: pd.DataFrame, period: int = 14) -> float:
+        """Расчет ATR без TA-Lib"""
+        if len(df) < period:
+            return 0.0
+            
+        high_low = df['high'] - df['low']
+        high_close = abs(df['high'] - df['close'].shift())
+        low_close = abs(df['low'] - df['close'].shift())
+        
+        true_range = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
+        atr = true_range.rolling(period).mean()
+        
+        return atr.iloc[-1] if not atr.empty else 0.0
