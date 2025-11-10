@@ -1,9 +1,11 @@
 symbols:
-  - BTCUSDT
-  - ETHUSDT
-  - ADAUSDT
-  - SOLUSDT
-  - XRPUSDT
+  - BTC/USDT
+  - ETH/USDT
+  - ADA/USDT
+  - SOL/USDT
+  - XRP/USDT
+
+exchange: "bybit"
 
 whale_detection:
   volume_multiplier: 5.0
@@ -15,8 +17,3 @@ notifications:
   telegram:
     enabled: true
     format: "detailed"
-
-signal_filters:
-  enable_volume_filter: true
-  min_volume_ratio: 3.0
-  enable_volatility_filter: true
