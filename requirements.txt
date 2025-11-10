@@ -8,7 +8,6 @@ ccxt==4.2.38
 # Анализ данных
 scikit-learn==1.3.2
 scipy==1.11.4
-ta-lib==0.4.28  # Заменили talib-binary на ta-lib
 
 # Утилиты
 python-dateutil==2.8.2
